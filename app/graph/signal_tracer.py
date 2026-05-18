@@ -41,7 +41,8 @@ def trace_path(project: Project, start: str) -> list[list[tuple[str, str]]]:
         ch.id
         for crate in project.crates
         for slot in crate.slots
-        for ch in slot.channels
+        if slot.module
+        for ch in slot.module.channels
     }
 
     results = []

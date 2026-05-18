@@ -21,7 +21,7 @@ class CrateConfigEditor(QDialog):
         self._populate_list()
 
     def _build_ui(self):
-        layout = QHBoxLayout(self)
+        layout = QHBoxLayout()
 
         # Left: list + buttons
         left = QVBoxLayout()
@@ -81,18 +81,16 @@ class CrateConfigEditor(QDialog):
         if row < 0 or row >= len(self.configs):
             return
         cfg = self.configs[row]
-        self.f_name.blockSignals(True)
-        self.f_type.blockSignals(True)
-        self.f_slots.blockSignals(True)
-        self.f_desc.blockSignals(True)
-        self.f_name.setText(cfg.name)
-        self.f_type.setCurrentText(cfg.crate_type)
-        self.f_slots.setValue(cfg.num_slots)
-        self.f_desc.setText(cfg.description)
-        self.f_name.blockSignals(False)
-        self.f_type.blockSignals(False)
-        self.f_slots.blockSignals(False)
-        self.f_desc.blockSignals(False)
+        for w in (self.f_name, self.f_type, self.f_slots, self.f_desc):
+            w.blockSignals(True)
+        try:
+            self.f_name.setText(cfg.name)
+            self.f_type.setCurrentText(cfg.crate_type)
+            self.f_slots.setValue(cfg.num_slots)
+            self.f_desc.setText(cfg.description)
+        finally:
+            for w in (self.f_name, self.f_type, self.f_slots, self.f_desc):
+                w.blockSignals(False)
 
     def _save_current(self):
         row = self.list_widget.currentRow()

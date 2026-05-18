@@ -143,13 +143,14 @@ class PatchPanelView(QWidget):
     def refresh(self):
         current_text = self.panel_selector.currentText()
         self.panel_selector.blockSignals(True)
-        self.panel_selector.clear()
-        for p in self.project.patch_panels:
-            self.panel_selector.addItem(f"{p.id} — {p.name}")
-        # restore selection
-        idx = self.panel_selector.findText(current_text)
-        self.panel_selector.setCurrentIndex(max(0, idx))
-        self.panel_selector.blockSignals(False)
+        try:
+            self.panel_selector.clear()
+            for p in self.project.patch_panels:
+                self.panel_selector.addItem(f"{p.id} — {p.name}")
+            idx = self.panel_selector.findText(current_text)
+            self.panel_selector.setCurrentIndex(max(0, idx))
+        finally:
+            self.panel_selector.blockSignals(False)
         self._draw_panel()
 
     def _on_panel_selected(self, _):

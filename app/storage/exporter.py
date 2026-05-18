@@ -54,14 +54,22 @@ def export_daq_excel(project: Project, path: str) -> None:
     wb = Workbook()
     ws = wb.active
     ws.title = "DAQ Channels"
-    ws.append(["Crate", "Crate Type", "Slot #", "Module Type", "Model", "Ch #", "Cable ID", "Signal Label", "Notes"])
+    ws.append(["Crate", "Crate Type", "Slot #", "Module", "Module Type", "Ch #", "Cable ID", "Signal Label", "Notes"])
     for crate in project.crates:
         for slot in crate.slots:
-            for ch in slot.channels:
+            if slot.module:
+                mod = slot.module
+                for ch in mod.channels:
+                    ws.append([
+                        crate.name or crate.id, crate.crate_type,
+                        slot.slot_number, mod.name or mod.id, mod.module_type,
+                        ch.channel_number, ch.cable_id, ch.signal_label, ch.notes
+                    ])
+            else:
                 ws.append([
                     crate.name or crate.id, crate.crate_type,
-                    slot.slot_number, slot.module_type, slot.model,
-                    ch.channel_number, ch.cable_id, ch.signal_label, ch.notes
+                    slot.slot_number, "(no module)", slot.module_type,
+                    "", "", "", ""
                 ])
     _auto_col_width(ws)
     wb.save(path)
@@ -107,14 +115,22 @@ def export_pdf(project: Project, path: str) -> None:
 
     # DAQ channel list
     story.append(Paragraph("DAQ Channel List", styles["Heading1"]))
-    daq_data = [["Crate", "Type", "Slot", "Module", "Model", "Ch", "Cable ID", "Signal", "Notes"]]
+    daq_data = [["Crate", "Type", "Slot", "Module", "Module Type", "Ch", "Cable ID", "Signal", "Notes"]]
     for crate in project.crates:
         for slot in crate.slots:
-            for ch in slot.channels:
+            if slot.module:
+                mod = slot.module
+                for ch in mod.channels:
+                    daq_data.append([
+                        crate.name or crate.id, crate.crate_type,
+                        str(slot.slot_number), mod.name or mod.id, mod.module_type,
+                        str(ch.channel_number), ch.cable_id, ch.signal_label, ch.notes
+                    ])
+            else:
                 daq_data.append([
                     crate.name or crate.id, crate.crate_type,
-                    str(slot.slot_number), slot.module_type, slot.model,
-                    str(ch.channel_number), ch.cable_id, ch.signal_label, ch.notes
+                    str(slot.slot_number), "(no module)", slot.module_type,
+                    "", "", "", ""
                 ])
     story.append(_pdf_table(daq_data))
 

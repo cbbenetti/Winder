@@ -1,7 +1,7 @@
 from dataclasses import dataclass, field
 from datetime import date
 
-from .cable import Cable
+from .cable import Cable, CableBundle
 from .patch_panel import PatchPanel
 from .daq import DaqCrate
 
@@ -16,6 +16,19 @@ class Project:
     cables: list = field(default_factory=list)
     patch_panels: list = field(default_factory=list)
     crates: list = field(default_factory=list)
+    bundles: list = field(default_factory=list)
+
+    def all_endpoint_ids(self) -> list[str]:
+        ids = set()
+        for panel in self.patch_panels:
+            for port in panel.ports:
+                ids.add(port.id)
+        for crate in self.crates:
+            for slot in crate.slots:
+                if slot.module:
+                    for ch in slot.module.channels:
+                        ids.add(ch.id)
+        return sorted(ids)
 
     def cable_by_id(self, cid: str):
         return next((c for c in self.cables if c.id == cid), None)
@@ -55,6 +68,7 @@ class Project:
                 "created": self.created,
             },
             "cables": [c.to_dict() for c in self.cables],
+            "bundles": [b.to_dict() for b in self.bundles],
             "patch_panels": [p.to_dict() for p in self.patch_panels],
             "daq_system": {
                 "crates": [cr.to_dict() for cr in self.crates],
@@ -70,6 +84,7 @@ class Project:
             created=meta.get("created", date.today().isoformat()),
         )
         proj.cables = [Cable.from_dict(c) for c in d.get("cables", [])]
+        proj.bundles = [CableBundle.from_dict(b) for b in d.get("bundles", [])]
         proj.patch_panels = [PatchPanel.from_dict(p) for p in d.get("patch_panels", [])]
         proj.crates = [DaqCrate.from_dict(cr) for cr in d.get("daq_system", {}).get("crates", [])]
         return proj

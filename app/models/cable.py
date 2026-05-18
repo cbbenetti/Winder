@@ -6,6 +6,26 @@ SIGNAL_TYPES = ["Analog", "Digital", "HV", "Timing", "Trigger", "Power", "Other"
 
 
 @dataclass
+class CableBundle:
+    id: str = ""
+    name: str = ""
+    cable_ids: list = field(default_factory=list)
+    color: str = "#78909c"
+
+    def to_dict(self) -> dict:
+        return {"id": self.id, "name": self.name, "cable_ids": list(self.cable_ids), "color": self.color}
+
+    @staticmethod
+    def from_dict(d: dict) -> "CableBundle":
+        return CableBundle(
+            id=d.get("id", ""),
+            name=d.get("name", ""),
+            cable_ids=list(d.get("cable_ids", [])),
+            color=d.get("color", "#78909c"),
+        )
+
+
+@dataclass
 class Cable:
     id: str = ""
     label: str = ""
@@ -27,6 +47,10 @@ class Cable:
             "length_m": self.length_m,
             "notes": self.notes,
         }
+
+    def cable_type_color(self) -> str:
+        from app.storage.cable_type import load_cable_types
+        return next((ct.color for ct in load_cable_types() if ct.id == self.cable_type), "#9e9e9e")
 
     @staticmethod
     def from_dict(d: dict) -> "Cable":

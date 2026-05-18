@@ -3,21 +3,21 @@ from typing import Callable
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QTreeWidget, QTreeWidgetItem,
     QPushButton, QMenu, QDialog, QFormLayout, QLineEdit, QSpinBox,
-    QComboBox, QDialogButtonBox, QMessageBox, QLabel, QHeaderView
+    QComboBox, QDialogButtonBox, QMessageBox, QHeaderView, QColorDialog,
+    QCheckBox, QLabel
 )
 from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QAction
+from PyQt6.QtGui import QColor
 
-from app.models.daq import DaqCrate, DaqSlot, DaqChannel, CRATE_TYPES, MODULE_TYPES
+from app.models.daq import DaqCrate, DaqSlot, DaqModule, DaqChannel, CRATE_TYPES, MODULE_TYPES
 from app.models.project import Project
 from app.storage.crate_config import load_configs
 
 
-LEVEL_CRATE = 0
-LEVEL_SLOT = 1
-LEVEL_CHANNEL = 2
-
-CH_COLS = ["Ch#", "Cable ID", "Signal Label", "Notes"]
+LEVEL_CRATE   = 0
+LEVEL_SLOT    = 1
+LEVEL_MODULE  = 2
+LEVEL_CHANNEL = 3
 
 
 class DaqMapper(QWidget):
@@ -43,6 +43,9 @@ class DaqMapper(QWidget):
         btn_templates = QPushButton("Manage Templates…")
         btn_templates.clicked.connect(self._manage_templates)
         toolbar.addWidget(btn_templates)
+        btn_library = QPushButton("Module Library…")
+        btn_library.clicked.connect(self._module_library)
+        toolbar.addWidget(btn_library)
         toolbar.addStretch()
         layout.addLayout(toolbar)
 
@@ -58,19 +61,24 @@ class DaqMapper(QWidget):
 
     def refresh(self):
         self.tree.blockSignals(True)
-        self.tree.clear()
-        for crate in self.project.crates:
-            crate_item = self._make_crate_item(crate)
-            self.tree.addTopLevelItem(crate_item)
-            crate_item.setExpanded(True)
-            for slot in crate.slots:
-                slot_item = self._make_slot_item(slot)
-                crate_item.addChild(slot_item)
-                slot_item.setExpanded(True)
-                for ch in slot.channels:
-                    ch_item = self._make_channel_item(ch)
-                    slot_item.addChild(ch_item)
-        self.tree.blockSignals(False)
+        try:
+            self.tree.clear()
+            for crate in self.project.crates:
+                crate_item = self._make_crate_item(crate)
+                self.tree.addTopLevelItem(crate_item)
+                crate_item.setExpanded(True)
+                for slot in crate.slots:
+                    slot_item = self._make_slot_item(slot)
+                    crate_item.addChild(slot_item)
+                    slot_item.setExpanded(True)
+                    if slot.module:
+                        mod_item = self._make_module_item(slot.module)
+                        slot_item.addChild(mod_item)
+                        mod_item.setExpanded(True)
+                        for ch in slot.module.channels:
+                            mod_item.addChild(self._make_channel_item(ch))
+        finally:
+            self.tree.blockSignals(False)
 
     def _make_crate_item(self, crate: DaqCrate) -> QTreeWidgetItem:
         item = QTreeWidgetItem([crate.name or crate.id, crate.crate_type, "", "", ""])
@@ -79,10 +87,21 @@ class DaqMapper(QWidget):
         return item
 
     def _make_slot_item(self, slot: DaqSlot) -> QTreeWidgetItem:
-        label = f"Slot {slot.slot_number}" + (f" — {slot.model}" if slot.model else "")
-        item = QTreeWidgetItem([label, slot.module_type, "", "", ""])
+        label = f"Slot {slot.slot_number:02d}"
+        type_label = slot.module.module_type if slot.module else slot.module_type
+        item = QTreeWidgetItem([label, type_label, "", "", ""])
         item.setData(0, Qt.ItemDataRole.UserRole, ("slot", slot.id))
+        item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+        return item
+
+    def _make_module_item(self, module: DaqModule) -> QTreeWidgetItem:
+        item = QTreeWidgetItem([module.name or module.id, module.module_type, "", "", ""])
+        item.setData(0, Qt.ItemDataRole.UserRole, ("module", module.id))
         item.setFlags(item.flags() | Qt.ItemFlag.ItemIsEditable)
+        color = QColor(module.color)
+        color.setAlpha(80)
+        for col in range(5):
+            item.setBackground(col, color)
         return item
 
     def _make_channel_item(self, ch: DaqChannel) -> QTreeWidgetItem:
@@ -102,11 +121,16 @@ class DaqMapper(QWidget):
                 menu.addAction("Add Slot", lambda: self._add_slot(obj_id))
                 menu.addAction("Delete Crate", lambda: self._delete_crate(obj_id))
             elif tag == "slot":
-                menu.addAction("Add Channel", lambda: self._add_channel(obj_id))
+                menu.addAction("Add Module", lambda: self._add_module(obj_id))
                 menu.addAction("Delete Slot", lambda: self._delete_slot(obj_id))
+            elif tag == "module":
+                menu.addAction("Add Channel", lambda: self._add_channel(obj_id))
+                menu.addAction("Delete Module", lambda: self._delete_module(obj_id))
             elif tag == "channel":
                 menu.addAction("Delete Channel", lambda: self._delete_channel(obj_id))
         menu.exec(self.tree.viewport().mapToGlobal(pos))
+
+    # ── Finders ────────────────────────────────────────────────────────────────
 
     def _find_crate(self, crate_id: str) -> DaqCrate | None:
         return next((c for c in self.project.crates if c.id == crate_id), None)
@@ -118,17 +142,38 @@ class DaqMapper(QWidget):
                     return crate, slot
         return None
 
-    def _find_channel(self, ch_id: str) -> tuple[DaqSlot, DaqChannel] | None:
+    def _find_module(self, module_id: str) -> tuple[DaqCrate, DaqSlot, DaqModule] | None:
         for crate in self.project.crates:
             for slot in crate.slots:
-                for ch in slot.channels:
-                    if ch.id == ch_id:
-                        return slot, ch
+                if slot.module and slot.module.id == module_id:
+                    return crate, slot, slot.module
         return None
+
+    def _find_channel(self, ch_id: str) -> tuple[DaqSlot, DaqModule, DaqChannel] | None:
+        for crate in self.project.crates:
+            for slot in crate.slots:
+                if slot.module:
+                    for ch in slot.module.channels:
+                        if ch.id == ch_id:
+                            return slot, slot.module, ch
+        return None
+
+    # ── Actions ────────────────────────────────────────────────────────────────
 
     def _manage_templates(self):
         from app.views.crate_config_editor import CrateConfigEditor
         CrateConfigEditor(self).exec()
+
+    def _module_library(self):
+        try:
+            from app.views.module_library_editor import ModuleLibraryEditor
+            ModuleLibraryEditor(self).exec()
+        except ImportError:
+            QMessageBox.information(
+                self, "Module Library",
+                "Module Library editor not yet available.\n"
+                "Use 'Add Module' on a slot to create modules."
+            )
 
     def _add_crate(self):
         dlg = _CrateDialog(self)
@@ -165,22 +210,55 @@ class DaqMapper(QWidget):
             id=f"{crate.id}-SL{slot_num:02d}",
             slot_number=slot_num,
             module_type=dlg.module_type(),
-            model=dlg.model(),
         )
         crate.slots.append(slot)
         crate.slots.sort(key=lambda s: s.slot_number)
         self.refresh()
         self.on_change()
 
-    def _add_channel(self, slot_id: str):
+    def _add_module(self, slot_id: str):
         result = self._find_slot(slot_id)
         if result is None:
             return
         crate, slot = result
+        if slot.module is not None:
+            QMessageBox.warning(
+                self, "Module exists",
+                f"Slot {slot.slot_number} already has a module.\n"
+                "Delete it first to replace it."
+            )
+            return
+        dlg = _ModuleDialog(self)
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+        mod_id = slot.id + "-MOD"
+        module = DaqModule(
+            id=mod_id,
+            name=dlg.name(),
+            module_type=dlg.module_type(),
+            color=dlg.color(),
+            channel_start=dlg.channel_start(),
+        )
+        start = dlg.channel_start()
+        for n in range(dlg.num_channels()):
+            ch_num = start + n
+            module.channels.append(DaqChannel(
+                id=f"{slot.id}-CH{ch_num:02d}",
+                channel_number=ch_num,
+            ))
+        slot.module = module
+        self.refresh()
+        self.on_change()
+
+    def _add_channel(self, module_id: str):
+        result = self._find_module(module_id)
+        if result is None:
+            return
+        crate, slot, module = result
         dlg = _ChannelDialog(self, [c.id for c in self.project.cables])
         if dlg.exec() != QDialog.DialogCode.Accepted:
             return
-        existing_chs = {ch.channel_number for ch in slot.channels}
+        existing_chs = {ch.channel_number for ch in module.channels}
         ch_num = dlg.channel_number()
         if ch_num in existing_chs:
             QMessageBox.warning(self, "Duplicate", f"Channel {ch_num} already exists.")
@@ -192,8 +270,8 @@ class DaqMapper(QWidget):
             signal_label=dlg.signal_label(),
             notes=dlg.notes(),
         )
-        slot.channels.append(ch)
-        slot.channels.sort(key=lambda c: c.channel_number)
+        module.channels.append(ch)
+        module.channels.sort(key=lambda c: c.channel_number)
         self.refresh()
         self.on_change()
 
@@ -201,9 +279,10 @@ class DaqMapper(QWidget):
         crate = self._find_crate(crate_id)
         if crate is None:
             return
-        if QMessageBox.question(self, "Delete", f"Delete crate {crate.name}?",
-                                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-                                ) != QMessageBox.StandardButton.Yes:
+        if QMessageBox.question(
+            self, "Delete", f"Delete crate {crate.name}?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        ) != QMessageBox.StandardButton.Yes:
             return
         self.project.crates.remove(crate)
         self.refresh()
@@ -214,11 +293,26 @@ class DaqMapper(QWidget):
         if result is None:
             return
         crate, slot = result
-        if QMessageBox.question(self, "Delete", f"Delete slot {slot.slot_number}?",
-                                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-                                ) != QMessageBox.StandardButton.Yes:
+        if QMessageBox.question(
+            self, "Delete", f"Delete slot {slot.slot_number}?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        ) != QMessageBox.StandardButton.Yes:
             return
         crate.slots.remove(slot)
+        self.refresh()
+        self.on_change()
+
+    def _delete_module(self, module_id: str):
+        result = self._find_module(module_id)
+        if result is None:
+            return
+        crate, slot, module = result
+        if QMessageBox.question(
+            self, "Delete", f"Delete module '{module.name}'? This also deletes all its channels.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        ) != QMessageBox.StandardButton.Yes:
+            return
+        slot.module = None
         self.refresh()
         self.on_change()
 
@@ -226,28 +320,33 @@ class DaqMapper(QWidget):
         result = self._find_channel(ch_id)
         if result is None:
             return
-        slot, ch = result
-        slot.channels.remove(ch)
+        slot, module, ch = result
+        module.channels.remove(ch)
         self.refresh()
         self.on_change()
 
     def _on_item_changed(self, item: QTreeWidgetItem, col: int):
-        tag, obj_id = item.data(0, Qt.ItemDataRole.UserRole)
+        data = item.data(0, Qt.ItemDataRole.UserRole)
+        if not data:
+            return
+        tag, obj_id = data
         text = item.text(col)
         if tag == "crate":
             crate = self._find_crate(obj_id)
             if crate and col == 0:
                 crate.name = text
-        elif tag == "slot":
-            result = self._find_slot(obj_id)
+        elif tag == "module":
+            result = self._find_module(obj_id)
             if result:
-                _, slot = result
-                if col == 1:
-                    slot.module_type = text
+                _, _, module = result
+                if col == 0:
+                    module.name = text
+                elif col == 1:
+                    module.module_type = text
         elif tag == "channel":
             result = self._find_channel(obj_id)
             if result:
-                _, ch = result
+                _, _, ch = result
                 if col == 2:
                     ch.cable_id = text
                 elif col == 3:
@@ -256,6 +355,8 @@ class DaqMapper(QWidget):
                     ch.notes = text
         self.on_change()
 
+
+# ── Dialogs ────────────────────────────────────────────────────────────────────
 
 class _CrateDialog(QDialog):
     def __init__(self, parent):
@@ -277,7 +378,7 @@ class _CrateDialog(QDialog):
         self._slots = QSpinBox()
         self._slots.setRange(0, 100)
         self._slots.setValue(0)
-        self._slots.setToolTip("Number of empty slots to create automatically (0 = none)")
+        self._slots.setToolTip("Number of empty slots to create (0 = none)")
 
         layout.addRow("Name:", self._name)
         layout.addRow("Type:", self._type)
@@ -310,11 +411,8 @@ class _SlotDialog(QDialog):
         self._slot.setRange(0, 31)
         self._module = QComboBox()
         self._module.addItems(MODULE_TYPES)
-        self._model = QLineEdit()
-        self._model.setPlaceholderText("e.g. CAEN V785")
         layout.addRow("Slot #:", self._slot)
-        layout.addRow("Module Type:", self._module)
-        layout.addRow("Model:", self._model)
+        layout.addRow("Default Module Type:", self._module)
         btn = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
         btn.accepted.connect(self.accept)
         btn.rejected.connect(self.reject)
@@ -322,7 +420,95 @@ class _SlotDialog(QDialog):
 
     def slot_number(self): return self._slot.value()
     def module_type(self): return self._module.currentText()
-    def model(self): return self._model.text().strip()
+
+
+class _ModuleDialog(QDialog):
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.setWindowTitle("Add Module")
+        self._color_val = "#546e7a"
+        layout = QFormLayout(self)
+
+        # Try to populate from library
+        self._lib_combo = QComboBox()
+        self._lib_combo.addItem("(custom)")
+        try:
+            from app.storage.module_library import load_module_library
+            self._lib_defs = load_module_library()
+            for defn in self._lib_defs:
+                self._lib_combo.addItem(f"{defn.name}  [{defn.module_type}, {defn.num_channels} ch]")
+        except Exception:
+            self._lib_defs = []
+        self._lib_combo.currentIndexChanged.connect(self._apply_library)
+        layout.addRow("From library:", self._lib_combo)
+
+        self._name = QLineEdit("New Module")
+        self._type = QComboBox()
+        self._type.addItems(MODULE_TYPES)
+
+        color_row = QHBoxLayout()
+        self._color_btn = QPushButton()
+        self._color_btn.setFixedSize(28, 22)
+        self._color_btn.setStyleSheet(
+            f"background-color: {self._color_val}; border: 1px solid #666;"
+        )
+        self._color_btn.clicked.connect(self._pick_color)
+        self._color_label = QLabel(self._color_val)
+        color_row.addWidget(self._color_btn)
+        color_row.addWidget(self._color_label)
+        color_row.addStretch()
+        color_widget = QWidget()
+        color_widget.setLayout(color_row)
+
+        self._ch_start = QSpinBox()
+        self._ch_start.setRange(0, 1)
+        self._ch_start.setValue(0)
+        self._ch_start.setToolTip("First channel number (0 or 1)")
+
+        self._num_ch = QSpinBox()
+        self._num_ch.setRange(0, 128)
+        self._num_ch.setValue(0)
+        self._num_ch.setToolTip("Auto-create this many channels (0 = none)")
+
+        layout.addRow("Name:", self._name)
+        layout.addRow("Module Type:", self._type)
+        layout.addRow("Color:", color_widget)
+        layout.addRow("Channel start:", self._ch_start)
+        layout.addRow("Channels to create:", self._num_ch)
+
+        btn = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        btn.accepted.connect(self.accept)
+        btn.rejected.connect(self.reject)
+        layout.addRow(btn)
+
+    def _pick_color(self):
+        color = QColorDialog.getColor(QColor(self._color_val), self, "Choose Module Color")
+        if color.isValid():
+            self._color_val = color.name()
+            self._color_label.setText(self._color_val)
+            self._color_btn.setStyleSheet(
+                f"background-color: {self._color_val}; border: 1px solid #666;"
+            )
+
+    def _apply_library(self, idx: int):
+        if idx == 0 or not self._lib_defs:
+            return
+        defn = self._lib_defs[idx - 1]
+        self._name.setText(defn.name)
+        self._type.setCurrentText(defn.module_type)
+        self._color_val = defn.color
+        self._color_label.setText(defn.color)
+        self._color_btn.setStyleSheet(
+            f"background-color: {defn.color}; border: 1px solid #666;"
+        )
+        self._ch_start.setValue(defn.channel_start)
+        self._num_ch.setValue(defn.num_channels)
+
+    def name(self): return self._name.text().strip()
+    def module_type(self): return self._type.currentText()
+    def color(self): return self._color_val
+    def channel_start(self): return self._ch_start.value()
+    def num_channels(self): return self._num_ch.value()
 
 
 class _ChannelDialog(QDialog):
@@ -331,7 +517,7 @@ class _ChannelDialog(QDialog):
         self.setWindowTitle("Add Channel")
         layout = QFormLayout(self)
         self._ch = QSpinBox()
-        self._ch.setRange(0, 63)
+        self._ch.setRange(0, 127)
         self._cable = QComboBox()
         self._cable.setEditable(True)
         self._cable.addItems([""] + cable_ids)

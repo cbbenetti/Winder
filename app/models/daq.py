@@ -34,21 +34,58 @@ class DaqChannel:
 
 
 @dataclass
+class DaqModule:
+    id: str = ""
+    name: str = ""
+    module_type: str = "ADC"
+    definition_id: str = ""
+    color: str = "#546e7a"
+    channel_start: int = 0
+    channels: list = field(default_factory=list)  # list[DaqChannel]
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "name": self.name,
+            "module_type": self.module_type,
+            "definition_id": self.definition_id,
+            "color": self.color,
+            "channel_start": self.channel_start,
+            "channels": [ch.to_dict() for ch in self.channels],
+        }
+
+    @staticmethod
+    def from_dict(d: dict) -> "DaqModule":
+        mod = DaqModule(
+            id=d.get("id", ""),
+            name=d.get("name", ""),
+            module_type=d.get("module_type", "ADC"),
+            definition_id=d.get("definition_id", ""),
+            color=d.get("color", "#546e7a"),
+            channel_start=int(d.get("channel_start", 0)),
+        )
+        mod.channels = [DaqChannel.from_dict(ch) for ch in d.get("channels", [])]
+        return mod
+
+
+@dataclass
 class DaqSlot:
     id: str = ""
     slot_number: int = 0
     module_type: str = "ADC"
     model: str = ""
-    channels: list = field(default_factory=list)
+    module: DaqModule | None = None
 
     def to_dict(self) -> dict:
-        return {
+        d: dict = {
             "id": self.id,
             "slot_number": self.slot_number,
             "module_type": self.module_type,
             "model": self.model,
-            "channels": [ch.to_dict() for ch in self.channels],
         }
+        if self.module is not None:
+            d["module"] = self.module.to_dict()
+        return d
 
     @staticmethod
     def from_dict(d: dict) -> "DaqSlot":
@@ -58,7 +95,16 @@ class DaqSlot:
             module_type=d.get("module_type", "ADC"),
             model=d.get("model", ""),
         )
-        slot.channels = [DaqChannel.from_dict(ch) for ch in d.get("channels", [])]
+        if "module" in d and d["module"]:
+            slot.module = DaqModule.from_dict(d["module"])
+        elif "channels" in d and d["channels"]:
+            # Migrate old format: channels lived directly on the slot
+            slot.module = DaqModule(
+                id=slot.id + "-MOD",
+                name=slot.model or slot.module_type,
+                module_type=slot.module_type,
+                channels=[DaqChannel.from_dict(ch) for ch in d["channels"]],
+            )
         return slot
 
 
