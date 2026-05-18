@@ -1,0 +1,42 @@
+from dataclasses import dataclass, field
+
+
+CABLE_TYPES = ["RG58", "RG59", "RG62", "Twisted Pair", "STP", "Fiber", "HV", "Ribbon", "Other"]
+SIGNAL_TYPES = ["Analog", "Digital", "HV", "Timing", "Trigger", "Power", "Other"]
+
+
+@dataclass
+class Cable:
+    id: str = ""
+    label: str = ""
+    cable_type: str = "RG58"
+    signal_type: str = "Analog"
+    from_endpoint: str = ""
+    to_endpoint: str = ""
+    length_m: float = 0.0
+    notes: str = ""
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "label": self.label,
+            "cable_type": self.cable_type,
+            "signal_type": self.signal_type,
+            "from_endpoint": self.from_endpoint,
+            "to_endpoint": self.to_endpoint,
+            "length_m": self.length_m,
+            "notes": self.notes,
+        }
+
+    @staticmethod
+    def from_dict(d: dict) -> "Cable":
+        return Cable(
+            id=d.get("id", ""),
+            label=d.get("label", ""),
+            cable_type=d.get("cable_type", "RG58"),
+            signal_type=d.get("signal_type", "Analog"),
+            from_endpoint=d.get("from_endpoint", ""),
+            to_endpoint=d.get("to_endpoint", ""),
+            length_m=float(d.get("length_m", 0.0)),
+            notes=d.get("notes", ""),
+        )
