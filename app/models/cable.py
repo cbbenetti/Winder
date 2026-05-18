@@ -35,6 +35,7 @@ class Cable:
     to_endpoint: str = ""
     length_m: float = 0.0
     notes: str = ""
+    direction: str = ""   # "" | "→ forward" | "← reverse" | "↔ both"
 
     def to_dict(self) -> dict:
         return {
@@ -46,6 +47,7 @@ class Cable:
             "to_endpoint": self.to_endpoint,
             "length_m": self.length_m,
             "notes": self.notes,
+            "direction": self.direction,
         }
 
     def cable_type_color(self) -> str:
@@ -63,4 +65,5 @@ class Cable:
             to_endpoint=d.get("to_endpoint", ""),
             length_m=float(d.get("length_m", 0.0)),
             notes=d.get("notes", ""),
+            direction=d.get("direction", ""),
         )

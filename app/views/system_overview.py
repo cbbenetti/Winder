@@ -1,15 +1,17 @@
+import math
 from typing import Callable
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
     QGraphicsView, QGraphicsScene, QGraphicsItem,
     QGraphicsRectItem, QGraphicsEllipseItem, QGraphicsPathItem, QGraphicsLineItem,
+    QGraphicsPolygonItem,
     QDialog, QFormLayout, QLineEdit, QComboBox, QDoubleSpinBox,
     QDialogButtonBox, QMenu,
 )
 from PyQt6.QtCore import Qt, QPointF, QRectF, QSizeF
 from PyQt6.QtGui import (
-    QColor, QPen, QBrush, QFont, QPainterPath, QPainter, QKeyEvent,
+    QColor, QPen, QBrush, QFont, QPainterPath, QPainter, QKeyEvent, QPolygonF,
 )
 
 from app.models.project import Project
@@ -27,8 +29,9 @@ HEADER_H = 32
 SLOT_H   = 24
 MODULE_H = 22
 CHAN_H   = 17
-PORT_H   = 22
-STUB_LEN = 60
+PORT_H     = 22
+PORT_ROW_H = 16   # px per individual port row in the panel block
+STUB_LEN   = 60
 CONN_R   = 8
 EAR_W    = 14   # rack ear width
 
@@ -171,8 +174,6 @@ class PanelBlock(QGraphicsRectItem):
 
     def set_size(self, w: float, h: float):
         self._display_w = w
-        self._display_h = h
-        self.setRect(0, 0, w, h)
         self._rebuild_connectors()
         self._overview._update_cables()
         self.update()
@@ -189,7 +190,9 @@ class PanelBlock(QGraphicsRectItem):
 
         cols = max(self._panel.cols, 1)
         rows = max(self._panel.rows, 1)
-        port_h = max((self._display_h - HEADER_H) / rows, 8.0)
+        block_h = float(HEADER_H + rows * cols * PORT_ROW_H)
+        self._display_h = block_h
+        self.setRect(0, 0, self._display_w, block_h)
 
         for row in range(rows):
             for col in range(cols):
@@ -199,13 +202,20 @@ class PanelBlock(QGraphicsRectItem):
                     port = PatchPort(id=port_id, row=row, col=col)
                     self._panel.ports.append(port)
                 if port.id:
+                    idx = row * cols + col
+                    y = HEADER_H + idx * PORT_ROW_H + PORT_ROW_H / 2
                     sig = port.signal_type or "Other"
-                    conn = ConnectorItem(port.id, sig)
-                    conn.setPos(self._display_w, HEADER_H + row * port_h + port_h / 2)
-                    conn.setParentItem(self)
-                    self._overview._conn[port.id] = conn
+                    conn_front = ConnectorItem(port.id, sig)
+                    conn_front.setPos(self._display_w, y)
+                    conn_front.setParentItem(self)
+                    self._overview._conn[port.id] = conn_front
+                    rear_id = f"{port.id}:rear"
+                    conn_rear = ConnectorItem(rear_id, sig)
+                    conn_rear.setPos(0.0, y)
+                    conn_rear.setParentItem(self)
+                    self._overview._conn[rear_id] = conn_rear
 
-        self._handle.setPos(self._display_w, self._display_h)
+        self._handle.setPos(self._display_w, block_h)
 
     # ── Qt overrides ───────────────────────────────────────────────────────────
 
@@ -222,8 +232,6 @@ class PanelBlock(QGraphicsRectItem):
         w, h = self._display_w, self._display_h
         cols = max(self._panel.cols, 1)
         rows = max(self._panel.rows, 1)
-        port_w = w / cols
-        port_h = max((h - HEADER_H) / rows, 8.0)
 
         # Header bar
         painter.fillRect(QRectF(0, 0, w, HEADER_H), C_PANEL_HDR)
@@ -234,24 +242,34 @@ class PanelBlock(QGraphicsRectItem):
             _elide(f"{self._panel.id}  —  {self._panel.name}", 32),
         )
 
-        # Port grid
+        # Per-port rows (each port gets its own horizontal row)
         for row in range(rows):
             for col in range(cols):
                 port = self._panel.port_at(row, col)
+                idx = row * cols + col
+                py = HEADER_H + idx * PORT_ROW_H
                 sig = (port.signal_type if port else None) or "Other"
                 fill = QColor(SIGNAL_COLORS.get(sig, SIGNAL_COLORS["Other"]))
-                px, py = col * port_w, HEADER_H + row * port_h
-                painter.fillRect(QRectF(px, py, port_w, port_h), fill)
+                painter.fillRect(QRectF(0, py, w, PORT_ROW_H), fill)
                 painter.setPen(QPen(C_BORDER, 0.5))
-                painter.drawRect(QRectF(px, py, port_w, port_h))
+                painter.drawRect(QRectF(0, py, w, PORT_ROW_H))
                 if port:
-                    lbl = port.label or (port.id[-4:] if port.id else "")
+                    auto_lbl = f"{chr(65 + row)}{col + 1:02d}"
+                    lbl = port.label or auto_lbl
                     painter.setPen(QPen(QColor("#212121")))
-                    painter.setFont(_font(max(5, min(7, int(port_w / 6)))))
+                    painter.setFont(_font(7))
                     painter.drawText(
-                        QRectF(px + 1, py + 1, port_w - 2, port_h - 2),
-                        Qt.AlignmentFlag.AlignCenter, _elide(lbl, 5),
+                        QRectF(6, py, w * 0.6, PORT_ROW_H),
+                        Qt.AlignmentFlag.AlignVCenter, _elide(lbl, 10),
                     )
+                    if port.label and port.label != auto_lbl:
+                        painter.setFont(_font(6))
+                        painter.setPen(QPen(QColor("#555")))
+                        painter.drawText(
+                            QRectF(w * 0.6, py, w * 0.4 - 6, PORT_ROW_H),
+                            Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignRight,
+                            auto_lbl,
+                        )
 
         # Outer border
         painter.setPen(QPen(C_RACK_EDGE, 2))
@@ -281,6 +299,8 @@ class CrateBlock(QGraphicsRectItem):
         self.setBrush(QBrush(Qt.GlobalColor.transparent))
         self._handle = _ResizeHandle(self, horizontal_only=True)
         self._handle.setParentItem(self)
+        self._module_bar_rects: list = []
+        self._press_pos = QPointF()
         self._rebuild_connectors()
 
     # ── Public resize API ──────────────────────────────────────────────────────
@@ -302,7 +322,13 @@ class CrateBlock(QGraphicsRectItem):
         for slot in crate.slots:
             h += SLOT_H
             if slot.module:
-                h += MODULE_H + len(slot.module.channels) * CHAN_H
+                h += MODULE_H
+                if not slot.module.collapsed:
+                    has_in  = any(ch.role == "input"  for ch in slot.module.channels)
+                    has_out = any(ch.role == "output" for ch in slot.module.channels)
+                    h += len(slot.module.channels) * CHAN_H
+                    if has_in and has_out:
+                        h += 14
         return max(h, float(HEADER_H + 24))
 
     def _rebuild_connectors(self):
@@ -317,17 +343,33 @@ class CrateBlock(QGraphicsRectItem):
         for slot in self._crate.slots:
             cy += SLOT_H
             if slot.module:
+                mod = slot.module
                 cy += MODULE_H
-                for ch in slot.module.channels:
-                    if ch.id:
-                        linked = (self._overview.project.cable_by_id(ch.cable_id)
-                                  if ch.cable_id else None)
-                        sig = linked.signal_type if linked else "Other"
-                        conn = ConnectorItem(ch.id, sig)
-                        conn.setPos(0.0, cy + CHAN_H / 2)
-                        conn.setParentItem(self)
-                        self._overview._conn[ch.id] = conn
-                    cy += CHAN_H
+                if not mod.collapsed:
+                    inputs  = [ch for ch in mod.channels if ch.role == "input"]
+                    outputs = [ch for ch in mod.channels if ch.role == "output"]
+                    for ch in inputs:
+                        if ch.id:
+                            linked = (self._overview.project.cable_by_id(ch.cable_id)
+                                      if ch.cable_id else None)
+                            sig = linked.signal_type if linked else "Other"
+                            conn = ConnectorItem(ch.id, sig)
+                            conn.setPos(0.0, cy + CHAN_H / 2)
+                            conn.setParentItem(self)
+                            self._overview._conn[ch.id] = conn
+                        cy += CHAN_H
+                    if inputs and outputs:
+                        cy += 14
+                    for ch in outputs:
+                        if ch.id:
+                            linked = (self._overview.project.cable_by_id(ch.cable_id)
+                                      if ch.cable_id else None)
+                            sig = linked.signal_type if linked else "Other"
+                            conn = ConnectorItem(ch.id, sig)
+                            conn.setPos(self._display_w, cy + CHAN_H / 2)
+                            conn.setParentItem(self)
+                            self._overview._conn[ch.id] = conn
+                        cy += CHAN_H
 
         h = self._content_h(self._crate)
         self._handle.setPos(self._display_w + EAR_W, h / 2)
@@ -340,6 +382,28 @@ class CrateBlock(QGraphicsRectItem):
                 self._overview._update_cables()
         return super().itemChange(change, value)
 
+    def mousePressEvent(self, event):
+        self._press_pos = event.scenePos()
+        super().mousePressEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        super().mouseReleaseEvent(event)
+        if event.button() == Qt.MouseButton.LeftButton:
+            delta = event.scenePos() - self._press_pos
+            if abs(delta.x()) < 5 and abs(delta.y()) < 5:
+                lp = event.pos()
+                for rect, mod in self._module_bar_rects:
+                    if rect.contains(lp):
+                        mod.collapsed = not mod.collapsed
+                        self.prepareGeometryChange()
+                        self._display_h = self._content_h(self._crate)
+                        self.setRect(0, 0, self._display_w, self._display_h)
+                        self._rebuild_connectors()
+                        self.update()
+                        self._overview.on_change()
+                        self._overview._update_cables()
+                        break
+
     def boundingRect(self) -> QRectF:
         h = self._content_h(self._crate)
         return QRectF(-EAR_W, 0, self._display_w + EAR_W * 2, h)
@@ -347,6 +411,7 @@ class CrateBlock(QGraphicsRectItem):
     def paint(self, painter: QPainter, option, widget=None):
         w = self._display_w
         h = self._content_h(self._crate)
+        self._module_bar_rects = []
 
         # Rack ears
         for ex, ew in ((-EAR_W, EAR_W), (w, EAR_W)):
@@ -384,14 +449,16 @@ class CrateBlock(QGraphicsRectItem):
 
             if slot.module:
                 mod = slot.module
-                # Module bar
                 mod_color = QColor(mod.color)
-                painter.fillRect(QRectF(0, cy, w, MODULE_H), mod_color)
+                mod_rect = QRectF(0, cy, w, MODULE_H)
+                self._module_bar_rects.append((mod_rect, mod))
+                painter.fillRect(mod_rect, mod_color)
                 painter.setPen(QPen(C_WHITE))
                 painter.setFont(_font(8, True))
+                icon = "▶ " if mod.collapsed else "▼ "
                 painter.drawText(
                     QRectF(8, cy, w - 60, MODULE_H), Qt.AlignmentFlag.AlignVCenter,
-                    _elide(mod.name or mod.id, 22),
+                    _elide(icon + (mod.name or mod.id), 24),
                 )
                 painter.setFont(_font(7))
                 painter.setPen(QPen(QColor("#cfd8dc")))
@@ -402,28 +469,66 @@ class CrateBlock(QGraphicsRectItem):
                 )
                 cy += MODULE_H
 
-                for i, ch in enumerate(mod.channels):
-                    fill = C_CHAN_A if i % 2 == 0 else C_CHAN_B
-                    painter.fillRect(QRectF(0, cy, w, CHAN_H), fill)
-                    painter.setPen(QPen(QColor("#bdbdbd"), 0.5))
-                    painter.drawLine(QPointF(0, cy + CHAN_H), QPointF(w, cy + CHAN_H))
-                    painter.setFont(_font(7, True))
-                    painter.setPen(QPen(QColor("#212121")))
-                    painter.drawText(
-                        QRectF(6, cy, 22, CHAN_H), Qt.AlignmentFlag.AlignVCenter,
-                        f"{ch.channel_number:02d}",
-                    )
-                    painter.setFont(_font(7))
-                    painter.drawText(
-                        QRectF(32, cy, 90, CHAN_H), Qt.AlignmentFlag.AlignVCenter,
-                        _elide(ch.signal_label, 14),
-                    )
-                    painter.setPen(QPen(QColor("#546e7a")))
-                    painter.drawText(
-                        QRectF(130, cy, 90, CHAN_H), Qt.AlignmentFlag.AlignVCenter,
-                        _elide(ch.cable_id, 12),
-                    )
-                    cy += CHAN_H
+                if not mod.collapsed:
+                    inputs  = [ch for ch in mod.channels if ch.role == "input"]
+                    outputs = [ch for ch in mod.channels if ch.role == "output"]
+                    has_both = bool(inputs) and bool(outputs)
+
+                    for i, ch in enumerate(inputs):
+                        fill = C_CHAN_A if i % 2 == 0 else C_CHAN_B
+                        painter.fillRect(QRectF(0, cy, w, CHAN_H), fill)
+                        painter.setPen(QPen(QColor("#bdbdbd"), 0.5))
+                        painter.drawLine(QPointF(0, cy + CHAN_H), QPointF(w, cy + CHAN_H))
+                        painter.setFont(_font(7, True))
+                        painter.setPen(QPen(QColor("#212121")))
+                        painter.drawText(
+                            QRectF(6, cy, 22, CHAN_H), Qt.AlignmentFlag.AlignVCenter,
+                            f"{ch.channel_number:02d}",
+                        )
+                        painter.setFont(_font(7))
+                        painter.drawText(
+                            QRectF(32, cy, 90, CHAN_H), Qt.AlignmentFlag.AlignVCenter,
+                            _elide(ch.signal_label, 14),
+                        )
+                        painter.setPen(QPen(QColor("#546e7a")))
+                        painter.drawText(
+                            QRectF(130, cy, 90, CHAN_H), Qt.AlignmentFlag.AlignVCenter,
+                            _elide(ch.cable_id, 12),
+                        )
+                        cy += CHAN_H
+
+                    if has_both:
+                        painter.fillRect(QRectF(0, cy, w, 14), QColor("#e3f2fd"))
+                        painter.setFont(_font(6))
+                        painter.setPen(QPen(QColor("#1565c0")))
+                        painter.drawText(
+                            QRectF(4, cy, w - 8, 14), Qt.AlignmentFlag.AlignVCenter,
+                            "OUT →",
+                        )
+                        cy += 14
+
+                    for i, ch in enumerate(outputs):
+                        fill = C_CHAN_A if i % 2 == 0 else C_CHAN_B
+                        painter.fillRect(QRectF(0, cy, w, CHAN_H), fill)
+                        painter.setPen(QPen(QColor("#bdbdbd"), 0.5))
+                        painter.drawLine(QPointF(0, cy + CHAN_H), QPointF(w, cy + CHAN_H))
+                        painter.setFont(_font(7, True))
+                        painter.setPen(QPen(QColor("#212121")))
+                        painter.drawText(
+                            QRectF(6, cy, 22, CHAN_H), Qt.AlignmentFlag.AlignVCenter,
+                            f"{ch.channel_number:02d}",
+                        )
+                        painter.setFont(_font(7))
+                        painter.drawText(
+                            QRectF(32, cy, 90, CHAN_H), Qt.AlignmentFlag.AlignVCenter,
+                            _elide(ch.signal_label, 14),
+                        )
+                        painter.setPen(QPen(QColor("#546e7a")))
+                        painter.drawText(
+                            QRectF(130, cy, 90, CHAN_H), Qt.AlignmentFlag.AlignVCenter,
+                            _elide(ch.cable_id, 12),
+                        )
+                        cy += CHAN_H
 
         # Crate border
         painter.setBrush(Qt.BrushStyle.NoBrush)
@@ -666,8 +771,7 @@ class SystemOverview(QWidget):
             bx = saved["x"] if saved else PANEL_X
             by = saved["y"] if saved else y
             bw = saved["w"] if saved else float(PANEL_W)
-            bh = saved.get("h", HEADER_H + panel.rows * PORT_H) if saved \
-                else float(HEADER_H + panel.rows * PORT_H)
+            bh = float(HEADER_H + panel.rows * panel.cols * PORT_ROW_H)
             block = PanelBlock(panel, self, bx, by, bw, bh)
             self._scene.addItem(block)
             self._blocks[key] = block
@@ -700,6 +804,25 @@ class SystemOverview(QWidget):
         self._draw_stubs()
         self._draw_bundles()
 
+    @staticmethod
+    def _arrowhead(tip: QPointF, tangent: QPointF, color: QColor) -> "QGraphicsPolygonItem | None":
+        length = math.hypot(tangent.x(), tangent.y())
+        if length < 1e-6:
+            return None
+        ux, uy = tangent.x() / length, tangent.y() / length
+        px, py = -uy, ux
+        sz, hw = 10.0, 5.0
+        poly = QPolygonF([
+            QPointF(tip.x(), tip.y()),
+            QPointF(tip.x() - sz * ux + hw * px, tip.y() - sz * uy + hw * py),
+            QPointF(tip.x() - sz * ux - hw * px, tip.y() - sz * uy - hw * py),
+        ])
+        item = QGraphicsPolygonItem(poly)
+        item.setBrush(QBrush(color))
+        item.setPen(QPen(color, 1))
+        item.setZValue(6)
+        return item
+
     def _draw_cables(self):
         for cable in self.project.cables:
             src_c = self._conn.get(cable.from_endpoint)
@@ -708,12 +831,23 @@ class SystemOverview(QWidget):
                 continue
             color = QColor(SIGNAL_COLORS.get(cable.signal_type, SIGNAL_COLORS["Other"]))
             src, dst = src_c.scenePos(), dst_c.scenePos()
-            path = QPainterPath(src)
             mid_x = (src.x() + dst.x()) / 2
-            path.cubicTo(QPointF(mid_x, src.y()), QPointF(mid_x, dst.y()), dst)
+            ctrl1, ctrl2 = QPointF(mid_x, src.y()), QPointF(mid_x, dst.y())
+            path = QPainterPath(src)
+            path.cubicTo(ctrl1, ctrl2, dst)
             cp = CablePath(cable, path, color, self)
             self._scene.addItem(cp)
             self._cable_items.append(cp)
+            if cable.direction in ("→ forward", "↔ both"):
+                ah = self._arrowhead(dst, dst - ctrl2, color)
+                if ah:
+                    self._scene.addItem(ah)
+                    self._cable_items.append(ah)
+            if cable.direction in ("← reverse", "↔ both"):
+                ah = self._arrowhead(src, src - ctrl1, color)
+                if ah:
+                    self._scene.addItem(ah)
+                    self._cable_items.append(ah)
 
     def _draw_stubs(self):
         for cable in self.project.cables:

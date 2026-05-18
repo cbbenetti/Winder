@@ -23,6 +23,7 @@ class Project:
         for panel in self.patch_panels:
             for port in panel.ports:
                 ids.add(port.id)
+                ids.add(f"{port.id}:rear")
         for crate in self.crates:
             for slot in crate.slots:
                 if slot.module:

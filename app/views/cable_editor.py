@@ -64,7 +64,7 @@ class _EndpointDelegate(QStyledItemDelegate):
         editor.setGeometry(option.rect)
 
 
-COLUMNS = ["ID", "Label", "Type", "Signal Type", "From", "To", "Length (m)", "Notes"]
+COLUMNS = ["ID", "Label", "Type", "Signal Type", "From", "To", "Length (m)", "Notes", "Direction"]
 COL = {name: i for i, name in enumerate(COLUMNS)}
 _TEXT_COLS = {COL["ID"], COL["Label"], COL["Length (m)"], COL["Notes"]}
 
@@ -152,10 +152,12 @@ class CableEditor(QWidget):
         self._type_delegate = _ComboDelegate([], self.table)
         self._sig_delegate = _ComboDelegate(list(SIGNAL_TYPES), self.table)
         self._endpoint_delegate = _EndpointDelegate(self.table)
+        self._dir_delegate = _ComboDelegate(["", "→ forward", "← reverse", "↔ both"], self.table)
         self.table.setItemDelegateForColumn(COL["Type"], self._type_delegate)
         self.table.setItemDelegateForColumn(COL["Signal Type"], self._sig_delegate)
         self.table.setItemDelegateForColumn(COL["From"], self._endpoint_delegate)
         self.table.setItemDelegateForColumn(COL["To"], self._endpoint_delegate)
+        self.table.setItemDelegateForColumn(COL["Direction"], self._dir_delegate)
         tc_layout.addWidget(self.table)
 
         prefix_row = QHBoxLayout()
@@ -278,6 +280,7 @@ class CableEditor(QWidget):
 
         self.table.setItem(row, COL["Length (m)"], QTableWidgetItem(str(cable.length_m)))
         self.table.setItem(row, COL["Notes"], QTableWidgetItem(cable.notes))
+        self.table.setItem(row, COL["Direction"], QTableWidgetItem(cable.direction))
 
         self._tint_row(row, cable.cable_type)
 
@@ -320,6 +323,7 @@ class CableEditor(QWidget):
             to_endpoint=cable.to_endpoint,
             length_m=cable.length_m,
             notes=cable.notes,
+            direction=cable.direction,
         )
         self.project.cables.append(new_cable)
         self.refresh()
@@ -369,6 +373,8 @@ class CableEditor(QWidget):
                 pass
         elif col == COL["Notes"]:
             cable.notes = text
+        elif col == COL["Direction"]:
+            cable.direction = text
         self.on_change()
 
     # ── Bundle management ──────────────────────────────────────────────────────

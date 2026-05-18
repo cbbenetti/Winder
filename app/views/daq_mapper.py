@@ -165,15 +165,8 @@ class DaqMapper(QWidget):
         CrateConfigEditor(self).exec()
 
     def _module_library(self):
-        try:
-            from app.views.module_library_editor import ModuleLibraryEditor
-            ModuleLibraryEditor(self).exec()
-        except ImportError:
-            QMessageBox.information(
-                self, "Module Library",
-                "Module Library editor not yet available.\n"
-                "Use 'Add Module' on a slot to create modules."
-            )
+        from app.views.module_library_editor import ModuleLibraryEditor
+        ModuleLibraryEditor(self).exec()
 
     def _add_crate(self):
         dlg = _CrateDialog(self)
@@ -240,12 +233,32 @@ class DaqMapper(QWidget):
             channel_start=dlg.channel_start(),
         )
         start = dlg.channel_start()
-        for n in range(dlg.num_channels()):
-            ch_num = start + n
-            module.channels.append(DaqChannel(
-                id=f"{slot.id}-CH{ch_num:02d}",
-                channel_number=ch_num,
-            ))
+        defn = dlg._selected_def
+        if defn is not None and (defn.inputs or defn.outputs):
+            ch_num = start
+            for spec in defn.inputs:
+                for _ in range(spec.num_channels):
+                    module.channels.append(DaqChannel(
+                        id=f"{slot.id}-CH{ch_num:02d}",
+                        channel_number=ch_num,
+                        role="input",
+                    ))
+                    ch_num += 1
+            for spec in defn.outputs:
+                for _ in range(spec.num_channels):
+                    module.channels.append(DaqChannel(
+                        id=f"{slot.id}-CH{ch_num:02d}",
+                        channel_number=ch_num,
+                        role="output",
+                    ))
+                    ch_num += 1
+        else:
+            for n in range(dlg.num_channels()):
+                ch_num = start + n
+                module.channels.append(DaqChannel(
+                    id=f"{slot.id}-CH{ch_num:02d}",
+                    channel_number=ch_num,
+                ))
         slot.module = module
         self.refresh()
         self.on_change()
@@ -269,6 +282,7 @@ class DaqMapper(QWidget):
             cable_id=dlg.cable_id(),
             signal_label=dlg.signal_label(),
             notes=dlg.notes(),
+            role=dlg.role(),
         )
         module.channels.append(ch)
         module.channels.sort(key=lambda c: c.channel_number)
@@ -430,6 +444,7 @@ class _ModuleDialog(QDialog):
         layout = QFormLayout(self)
 
         # Try to populate from library
+        self._selected_def = None
         self._lib_combo = QComboBox()
         self._lib_combo.addItem("(custom)")
         try:
@@ -492,8 +507,10 @@ class _ModuleDialog(QDialog):
 
     def _apply_library(self, idx: int):
         if idx == 0 or not self._lib_defs:
+            self._selected_def = None
             return
         defn = self._lib_defs[idx - 1]
+        self._selected_def = defn
         self._name.setText(defn.name)
         self._type.setCurrentText(defn.module_type)
         self._color_val = defn.color
@@ -523,10 +540,13 @@ class _ChannelDialog(QDialog):
         self._cable.addItems([""] + cable_ids)
         self._label = QLineEdit()
         self._notes = QLineEdit()
+        self._role = QComboBox()
+        self._role.addItems(["input", "output"])
         layout.addRow("Channel #:", self._ch)
         layout.addRow("Cable ID:", self._cable)
         layout.addRow("Signal Label:", self._label)
         layout.addRow("Notes:", self._notes)
+        layout.addRow("Role:", self._role)
         btn = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
         btn.accepted.connect(self.accept)
         btn.rejected.connect(self.reject)
@@ -536,3 +556,4 @@ class _ChannelDialog(QDialog):
     def cable_id(self): return self._cable.currentText().strip()
     def signal_label(self): return self._label.text().strip()
     def notes(self): return self._notes.text().strip()
+    def role(self): return self._role.currentText()
