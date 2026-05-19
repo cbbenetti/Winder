@@ -3,10 +3,32 @@ from PyQt6.QtWidgets import (
     QFormLayout, QLineEdit, QComboBox, QSpinBox, QPushButton,
     QLabel, QTableWidget, QTableWidgetItem, QHeaderView,
     QDialogButtonBox, QColorDialog, QWidget, QFrame, QSplitter,
-    QMessageBox, QAbstractItemView
+    QMessageBox, QAbstractItemView, QStyledItemDelegate, QCheckBox
 )
 from PyQt6.QtGui import QColor, QPixmap, QIcon
 from PyQt6.QtCore import Qt
+
+
+class _ConnTypeDelegate(QStyledItemDelegate):
+    def __init__(self, items: list[str], parent=None):
+        super().__init__(parent)
+        self._items = list(items)
+
+    def createEditor(self, parent, option, index):
+        cb = QComboBox(parent)
+        cb.addItems(self._items)
+        return cb
+
+    def setEditorData(self, editor, index):
+        val = index.data(Qt.ItemDataRole.EditRole) or ""
+        i = editor.findText(val)
+        editor.setCurrentIndex(max(0, i))
+
+    def setModelData(self, editor, model, index):
+        model.setData(index, editor.currentText(), Qt.ItemDataRole.EditRole)
+
+    def updateEditorGeometry(self, editor, option, index):
+        editor.setGeometry(option.rect)
 
 from app.storage.module_library import (
     ModuleDefinition, ConnectorSpec, CONNECTOR_TYPES,
@@ -85,6 +107,9 @@ class ModuleLibraryEditor(QDialog):
         self._ch_start.setRange(0, 1)
         form.addRow("Channel Start (0/1):", self._ch_start)
 
+        self._coupled_io = QCheckBox("Couple input/output channel numbers")
+        form.addRow("", self._coupled_io)
+
         right.addLayout(form)
 
         # Connectors tables
@@ -96,6 +121,7 @@ class ModuleLibraryEditor(QDialog):
             tbl.setHorizontalHeaderLabels(["Name", "Type", "Channels"])
             tbl.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
             tbl.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+            tbl.setItemDelegateForColumn(1, _ConnTypeDelegate(CONNECTOR_TYPES, tbl))
             setattr(self, attr, tbl)
             btn_add = QPushButton(f"+ Add {label[:-1]}")
             btn_add.clicked.connect(lambda _, t=tbl: self._add_connector_row(t))
@@ -159,6 +185,7 @@ class ModuleLibraryEditor(QDialog):
         self._color_btn.setStyleSheet(f"background-color: {d.color}; border: 1px solid #666;")
         self._num_ch.setValue(d.num_channels)
         self._ch_start.setValue(d.channel_start)
+        self._coupled_io.setChecked(d.coupled_io)
         self._fill_connector_table(self._inputs_table, d.inputs)
         self._fill_connector_table(self._outputs_table, d.outputs)
         self._building = False
@@ -170,20 +197,17 @@ class ModuleLibraryEditor(QDialog):
             row = tbl.rowCount()
             tbl.insertRow(row)
             tbl.setItem(row, 0, QTableWidgetItem(spec.name))
-            combo = QComboBox()
-            combo.addItems(CONNECTOR_TYPES)
-            combo.setCurrentText(spec.type)
-            tbl.setCellWidget(row, 1, combo)
+            tbl.setItem(row, 1, QTableWidgetItem(spec.type))
             tbl.setItem(row, 2, QTableWidgetItem(str(spec.num_channels)))
 
     def _read_connector_table(self, tbl: QTableWidget) -> list[ConnectorSpec]:
         specs = []
         for row in range(tbl.rowCount()):
             name_item = tbl.item(row, 0)
-            combo = tbl.cellWidget(row, 1)
+            type_item = tbl.item(row, 1)
             ch_item = tbl.item(row, 2)
             name = name_item.text().strip() if name_item else ""
-            ctype = combo.currentText() if combo else "single"
+            ctype = type_item.text() if type_item else "single"
             try:
                 num_ch = int(ch_item.text()) if ch_item else 1
             except ValueError:
@@ -195,9 +219,7 @@ class ModuleLibraryEditor(QDialog):
         row = tbl.rowCount()
         tbl.insertRow(row)
         tbl.setItem(row, 0, QTableWidgetItem(""))
-        combo = QComboBox()
-        combo.addItems(CONNECTOR_TYPES)
-        tbl.setCellWidget(row, 1, combo)
+        tbl.setItem(row, 1, QTableWidgetItem(CONNECTOR_TYPES[0] if CONNECTOR_TYPES else "single"))
         tbl.setItem(row, 2, QTableWidgetItem("1"))
 
     def _remove_connector_row(self, tbl: QTableWidget):
@@ -207,7 +229,7 @@ class ModuleLibraryEditor(QDialog):
 
     def _set_form_enabled(self, enabled: bool):
         for w in [self._name, self._mtype, self._color_btn,
-                  self._num_ch, self._ch_start,
+                  self._num_ch, self._ch_start, self._coupled_io,
                   self._inputs_table, self._outputs_table]:
             w.setEnabled(enabled)
 
@@ -255,6 +277,7 @@ class ModuleLibraryEditor(QDialog):
             d.color = self._color_val
             d.num_channels = self._num_ch.value()
             d.channel_start = self._ch_start.value()
+            d.coupled_io = self._coupled_io.isChecked()
             d.inputs  = self._read_connector_table(self._inputs_table)
             d.outputs = self._read_connector_table(self._outputs_table)
             self._list.item(self._current_idx).setText(d.name)

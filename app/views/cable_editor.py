@@ -4,7 +4,7 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QTableWidget, QTableWidgetItem,
     QPushButton, QLineEdit, QLabel, QComboBox, QCompleter, QHeaderView, QAbstractItemView,
     QMessageBox, QSplitter, QTabWidget, QListWidget, QListWidgetItem,
-    QColorDialog, QFrame, QStyledItemDelegate
+    QColorDialog, QFrame, QStyledItemDelegate, QInputDialog
 )
 from PyQt6.QtGui import QColor
 from PyQt6.QtCore import Qt
@@ -125,9 +125,12 @@ class CableEditor(QWidget):
         self.btn_dup.clicked.connect(self._duplicate_cable)
         self.btn_del = QPushButton("Delete")
         self.btn_del.clicked.connect(self._delete_cable)
+        self.btn_rename = QPushButton("Rename ID…")
+        self.btn_rename.clicked.connect(self._rename_cable_id)
         toolbar.addWidget(self.btn_add)
         toolbar.addWidget(self.btn_dup)
         toolbar.addWidget(self.btn_del)
+        toolbar.addWidget(self.btn_rename)
         toolbar.addStretch()
         toolbar.addWidget(QLabel("Filter:"))
         self.filter_box = QLineEdit()
@@ -326,6 +329,23 @@ class CableEditor(QWidget):
             direction=cable.direction,
         )
         self.project.cables.append(new_cable)
+        self.refresh()
+        self.on_change()
+
+    def _rename_cable_id(self):
+        cable = self._current_cable()
+        if cable is None:
+            return
+        new_id, ok = QInputDialog.getText(
+            self, "Rename Cable ID", "New cable ID:", text=cable.id
+        )
+        if not ok or not new_id.strip():
+            return
+        new_id = new_id.strip()
+        if not self.project.rename_cable(cable.id, new_id):
+            QMessageBox.warning(self, "Cannot Rename",
+                                f"ID '{new_id}' is already in use or invalid.")
+            return
         self.refresh()
         self.on_change()
 

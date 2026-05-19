@@ -4,7 +4,7 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QTreeWidget, QTreeWidgetItem,
     QPushButton, QMenu, QDialog, QFormLayout, QLineEdit, QSpinBox,
     QComboBox, QDialogButtonBox, QMessageBox, QHeaderView, QColorDialog,
-    QCheckBox, QLabel
+    QCheckBox, QLabel, QSizePolicy
 )
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QColor
@@ -105,9 +105,15 @@ class DaqMapper(QWidget):
         return item
 
     def _make_channel_item(self, ch: DaqChannel) -> QTreeWidgetItem:
-        item = QTreeWidgetItem(["", str(ch.channel_number), ch.cable_id, ch.signal_label, ch.notes])
+        role_text = "IN ▸" if ch.role != "output" else "◂ OUT"
+        if ch.connector:
+            role_text += f"  {ch.connector}"
+        item = QTreeWidgetItem([role_text, str(ch.channel_number), ch.cable_id, ch.signal_label, ch.notes])
         item.setData(0, Qt.ItemDataRole.UserRole, ("channel", ch.id))
         item.setFlags(item.flags() | Qt.ItemFlag.ItemIsEditable)
+        color = QColor("#e3f2fd") if ch.role != "output" else QColor("#fce4ec")
+        item.setBackground(0, color)
+        item.setBackground(1, color)
         return item
 
     def _context_menu(self, pos):
@@ -127,6 +133,7 @@ class DaqMapper(QWidget):
                 menu.addAction("Add Channel", lambda: self._add_channel(obj_id))
                 menu.addAction("Delete Module", lambda: self._delete_module(obj_id))
             elif tag == "channel":
+                menu.addAction("Toggle Input/Output", lambda: self._toggle_channel_role(obj_id))
                 menu.addAction("Delete Channel", lambda: self._delete_channel(obj_id))
         menu.exec(self.tree.viewport().mapToGlobal(pos))
 
@@ -231,27 +238,50 @@ class DaqMapper(QWidget):
             module_type=dlg.module_type(),
             color=dlg.color(),
             channel_start=dlg.channel_start(),
+            coupled_io=dlg.coupled_io(),
         )
         start = dlg.channel_start()
         defn = dlg._selected_def
         if defn is not None and (defn.inputs or defn.outputs):
-            ch_num = start
-            for spec in defn.inputs:
-                for _ in range(spec.num_channels):
-                    module.channels.append(DaqChannel(
-                        id=f"{slot.id}-CH{ch_num:02d}",
-                        channel_number=ch_num,
-                        role="input",
-                    ))
-                    ch_num += 1
-            for spec in defn.outputs:
-                for _ in range(spec.num_channels):
-                    module.channels.append(DaqChannel(
-                        id=f"{slot.id}-CH{ch_num:02d}",
-                        channel_number=ch_num,
-                        role="output",
-                    ))
-                    ch_num += 1
+            if module.coupled_io:
+                all_specs = list(defn.inputs) + list(defn.outputs)
+                ch_per_spec = max((s.num_channels for s in all_specs), default=0)
+                for k in range(ch_per_spec):
+                    ch_num = start + k
+                    for s_idx, spec in enumerate(defn.inputs):
+                        if k < spec.num_channels:
+                            module.channels.append(DaqChannel(
+                                id=f"{slot.id}-I{s_idx}-{ch_num:02d}",
+                                channel_number=ch_num,
+                                role="input",
+                                connector=spec.name,
+                            ))
+                    for s_idx, spec in enumerate(defn.outputs):
+                        if k < spec.num_channels:
+                            module.channels.append(DaqChannel(
+                                id=f"{slot.id}-O{s_idx}-{ch_num:02d}",
+                                channel_number=ch_num,
+                                role="output",
+                                connector=spec.name,
+                            ))
+            else:
+                ch_num = start
+                for spec in defn.inputs:
+                    for _ in range(spec.num_channels):
+                        module.channels.append(DaqChannel(
+                            id=f"{slot.id}-CH{ch_num:02d}",
+                            channel_number=ch_num,
+                            role="input",
+                        ))
+                        ch_num += 1
+                for spec in defn.outputs:
+                    for _ in range(spec.num_channels):
+                        module.channels.append(DaqChannel(
+                            id=f"{slot.id}-CH{ch_num:02d}",
+                            channel_number=ch_num,
+                            role="output",
+                        ))
+                        ch_num += 1
         else:
             for n in range(dlg.num_channels()):
                 ch_num = start + n
@@ -330,6 +360,15 @@ class DaqMapper(QWidget):
         self.refresh()
         self.on_change()
 
+    def _toggle_channel_role(self, ch_id: str):
+        result = self._find_channel(ch_id)
+        if result is None:
+            return
+        _, _, ch = result
+        ch.role = "output" if ch.role != "output" else "input"
+        self.refresh()
+        self.on_change()
+
     def _delete_channel(self, ch_id: str):
         result = self._find_channel(ch_id)
         if result is None:
@@ -361,7 +400,13 @@ class DaqMapper(QWidget):
             result = self._find_channel(obj_id)
             if result:
                 _, _, ch = result
-                if col == 2:
+                if col == 0:
+                    item.setText(0, "IN ▸" if ch.role != "output" else "◂ OUT")
+                    return
+                elif col == 1:
+                    item.setText(1, str(ch.channel_number))
+                    return
+                elif col == 2:
                     ch.cable_id = text
                 elif col == 3:
                     ch.signal_label = text
@@ -485,11 +530,14 @@ class _ModuleDialog(QDialog):
         self._num_ch.setValue(0)
         self._num_ch.setToolTip("Auto-create this many channels (0 = none)")
 
+        self._coupled = QCheckBox("Couple input/output channel numbers (same ch# for paired in/out)")
+
         layout.addRow("Name:", self._name)
         layout.addRow("Module Type:", self._type)
         layout.addRow("Color:", color_widget)
         layout.addRow("Channel start:", self._ch_start)
         layout.addRow("Channels to create:", self._num_ch)
+        layout.addRow("", self._coupled)
 
         btn = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
         btn.accepted.connect(self.accept)
@@ -520,12 +568,14 @@ class _ModuleDialog(QDialog):
         )
         self._ch_start.setValue(defn.channel_start)
         self._num_ch.setValue(defn.num_channels)
+        self._coupled.setChecked(defn.coupled_io)
 
     def name(self): return self._name.text().strip()
     def module_type(self): return self._type.currentText()
     def color(self): return self._color_val
     def channel_start(self): return self._ch_start.value()
     def num_channels(self): return self._num_ch.value()
+    def coupled_io(self): return self._coupled.isChecked()
 
 
 class _ChannelDialog(QDialog):

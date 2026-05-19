@@ -12,7 +12,8 @@ class DaqChannel:
     cable_id: str = ""
     signal_label: str = ""
     notes: str = ""
-    role: str = "input"   # "input" | "output"
+    role: str = "input"       # "input" | "output"
+    connector: str = ""       # ConnectorSpec name this channel belongs to
 
     def to_dict(self) -> dict:
         return {
@@ -22,6 +23,7 @@ class DaqChannel:
             "signal_label": self.signal_label,
             "notes": self.notes,
             "role": self.role,
+            "connector": self.connector,
         }
 
     @staticmethod
@@ -33,6 +35,7 @@ class DaqChannel:
             signal_label=d.get("signal_label", ""),
             notes=d.get("notes", ""),
             role=d.get("role", "input"),
+            connector=d.get("connector", ""),
         )
 
 
@@ -46,6 +49,7 @@ class DaqModule:
     channel_start: int = 0
     channels: list = field(default_factory=list)  # list[DaqChannel]
     collapsed: bool = False
+    coupled_io: bool = False
 
     def to_dict(self) -> dict:
         return {
@@ -57,6 +61,7 @@ class DaqModule:
             "channel_start": self.channel_start,
             "channels": [ch.to_dict() for ch in self.channels],
             "collapsed": self.collapsed,
+            "coupled_io": self.coupled_io,
         }
 
     @staticmethod
@@ -69,6 +74,7 @@ class DaqModule:
             color=d.get("color", "#546e7a"),
             channel_start=int(d.get("channel_start", 0)),
             collapsed=bool(d.get("collapsed", False)),
+            coupled_io=bool(d.get("coupled_io", False)),
         )
         mod.channels = [DaqChannel.from_dict(ch) for ch in d.get("channels", [])]
         return mod

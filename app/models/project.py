@@ -13,6 +13,10 @@ class Project:
     name: str = "Untitled Project"
     version: str = APP_VERSION
     created: str = field(default_factory=lambda: date.today().isoformat())
+    author: str = ""
+    description: str = ""
+    revision: str = ""
+    modified: str = ""
     cables: list = field(default_factory=list)
     patch_panels: list = field(default_factory=list)
     crates: list = field(default_factory=list)
@@ -61,12 +65,42 @@ class Project:
                 return candidate
             n += 1
 
+    def rename_cable(self, old_id: str, new_id: str) -> bool:
+        """Rename cable ID and propagate to all refs. Returns False on collision."""
+        if not new_id or new_id == old_id:
+            return False
+        if any(c.id == new_id for c in self.cables):
+            return False
+        cable = self.cable_by_id(old_id)
+        if cable is None:
+            return False
+        cable.id = new_id
+        for crate in self.crates:
+            for slot in crate.slots:
+                if slot.module:
+                    for ch in slot.module.channels:
+                        if ch.cable_id == old_id:
+                            ch.cable_id = new_id
+        for panel in self.patch_panels:
+            for port in panel.ports:
+                if port.front_cable_id == old_id:
+                    port.front_cable_id = new_id
+                if port.rear_cable_id == old_id:
+                    port.rear_cable_id = new_id
+        for bundle in self.bundles:
+            bundle.cable_ids = [new_id if cid == old_id else cid for cid in bundle.cable_ids]
+        return True
+
     def to_dict(self) -> dict:
         return {
             "project": {
                 "name": self.name,
                 "version": self.version,
                 "created": self.created,
+                "author": self.author,
+                "description": self.description,
+                "revision": self.revision,
+                "modified": self.modified,
             },
             "cables": [c.to_dict() for c in self.cables],
             "bundles": [b.to_dict() for b in self.bundles],
@@ -83,6 +117,10 @@ class Project:
             name=meta.get("name", "Untitled Project"),
             version=meta.get("version", APP_VERSION),
             created=meta.get("created", date.today().isoformat()),
+            author=meta.get("author", ""),
+            description=meta.get("description", ""),
+            revision=meta.get("revision", ""),
+            modified=meta.get("modified", ""),
         )
         proj.cables = [Cable.from_dict(c) for c in d.get("cables", [])]
         proj.bundles = [CableBundle.from_dict(b) for b in d.get("bundles", [])]

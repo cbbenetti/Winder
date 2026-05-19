@@ -80,6 +80,7 @@ class ModuleDefinition:
     module_type: str = "ADC"
     num_channels: int = 0
     channel_start: int = 0
+    coupled_io: bool = False
     inputs: list = field(default_factory=list)   # list[ConnectorSpec]
     outputs: list = field(default_factory=list)  # list[ConnectorSpec]
 
@@ -91,6 +92,7 @@ class ModuleDefinition:
             "module_type": self.module_type,
             "num_channels": self.num_channels,
             "channel_start": self.channel_start,
+            "coupled_io": self.coupled_io,
             "inputs":  [c.to_dict() for c in self.inputs],
             "outputs": [c.to_dict() for c in self.outputs],
         }
@@ -104,6 +106,7 @@ class ModuleDefinition:
             module_type=d.get("module_type", "ADC"),
             num_channels=int(d.get("num_channels", 0)),
             channel_start=int(d.get("channel_start", 0)),
+            coupled_io=bool(d.get("coupled_io", False)),
         )
         defn.inputs  = [ConnectorSpec.from_dict(c) for c in d.get("inputs",  [])]
         defn.outputs = [ConnectorSpec.from_dict(c) for c in d.get("outputs", [])]
